@@ -1,0 +1,383 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SERAPHY CLOUD</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#090710;color:white;
+ font-family:Arial,sans-serif;
+}
+header{
+ padding:22px 7%;border-bottom:1px solid #302044;
+ display:flex;justify-content:space-between;align-items:center;
+}
+h1{color:#b77aff;letter-spacing:3px;margin:0}
+main{max-width:900px;margin:35px auto;padding:15px}
+.card{
+ background:#151020;border:1px solid #493064;
+ border-radius:15px;padding:24px;margin-bottom:20px;
+}
+input,button{
+ width:100%;padding:13px;margin:8px 0;
+ border-radius:8px;border:1px solid #493064;
+}
+input{background:#090710;color:white}
+button{
+ background:#873bd1;color:white;border:0;
+ font-weight:bold;cursor:pointer;
+}
+button:hover{background:#a65cf0}
+button:disabled{opacity:.5;cursor:not-allowed}
+.secondary{background:#332343}
+.file{
+ padding:13px 0;border-bottom:1px solid #493064;
+ display:flex;justify-content:space-between;
+ align-items:center;gap:10px;flex-wrap:wrap;
+}
+.file button{width:auto;padding:9px 14px}
+.file-actions{display:flex;gap:7px}
+.hidden{display:none!important}
+small,.muted{color:#c7a9e7}
+#message,#status{white-space:pre-wrap;color:#d7b5ff}
+#files{margin-top:15px}
+footer{text-align:center;color:#9478ac;padding:25px}
+</style>
+</head>
+
+<body>
+
+<header>
+<h1>SERAPHY CLOUD</h1>
+<button id="logoutTop" class="hidden" style="width:auto" onclick="logout()">Logout</button>
+</header>
+
+<main>
+
+<section id="auth" class="card">
+<h2>Welcome to SERAPHY CLOUD</h2>
+<p class="muted">Your Files, Anywhere, Anytime.</p>
+
+<input id="email" type="email" placeholder="Email address" autocomplete="email">
+<input id="password" type="password" placeholder="Password" autocomplete="current-password">
+
+<button id="signupButton" onclick="signup()">Create Account</button>
+<button class="secondary" onclick="login()">Login</button>
+<p id="message"></p>
+</section>
+
+<section id="dashboard" class="hidden">
+
+<div class="card">
+<h2>My Cloud Storage</h2>
+<p id="account" class="muted"></p>
+
+<h3>Upload a file</h3>
+<input type="file" id="fileInput">
+<button id="uploadButton" onclick="uploadFile()">Upload File</button>
+<p id="status"></p>
+</div>
+
+<div class="card">
+<h2>My Files</h2>
+<p class="muted">Your private uploaded files.</p>
+<input id="search" type="search" placeholder="Search your files..." oninput="renderFiles()">
+<div id="files">Loading files...</div>
+<button class="secondary" onclick="loadFiles()">Refresh Files</button>
+</div>
+
+</section>
+
+</main>
+
+<footer>SERAPHY CLOUD · Beyond All Definitions</footer>
+
+<script>
+// SUPABASE CONNECTION
+const SUPABASE_URL = "https://rxhcftozmpezceqcdwqz.supabase.co";
+const SUPABASE_KEY = "sb_publishable_cKM4Zi1dlDXXjnAo_KUdWw_-_M6-blU";
+
+const db = window.supabase.createClient(
+ SUPABASE_URL,
+ SUPABASE_KEY
+);
+
+const BUCKET = "user-files";
+
+let currentFiles = [];
+let currentUser = null;
+
+function showMessage(text){
+ document.getElementById("message").textContent=text;
+}
+
+function showStatus(text){
+ document.getElementById("status").textContent=text;
+}
+
+// SIGN UP
+async function signup(){
+ const email=document.getElementById("email").value.trim();
+ const password=document.getElementById("password").value;
+
+ if(!email || !password){
+  showMessage("Enter your email and password.");
+  return;
+ }
+
+ if(password.length<6){
+  showMessage("Password must have at least 6 characters.");
+  return;
+ }
+
+ const button=document.getElementById("signupButton");
+ button.disabled=true;
+ showMessage("Creating your account...");
+
+ try{
+  const {data,error}=await db.auth.signUp({
+   email,password
+  });
+
+  if(error) throw error;
+
+  if(data.session){
+   showMessage("Account created successfully!");
+   await showDashboard(data.user);
+  }else{
+   showMessage("Account created. If confirmation is disabled in Supabase, you can now log in.");
+  }
+ }catch(error){
+  showMessage(error.message);
+ }finally{
+  button.disabled=false;
+ }
+}
+
+// LOGIN
+async function login(){
+ const email=document.getElementById("email").value.trim();
+ const password=document.getElementById("password").value;
+
+ if(!email || !password){
+  showMessage("Enter your email and password.");
+  return;
+ }
+
+ showMessage("Logging in...");
+
+ try{
+  const {data,error}=await db.auth.signInWithPassword({
+   email,password
+  });
+
+  if(error) throw error;
+  await showDashboard(data.user);
+ }catch(error){
+  showMessage(error.message);
+ }
+}
+
+// SHOW DASHBOARD
+async function showDashboard(user){
+ currentUser=user;
+
+ document.getElementById("auth").classList.add("hidden");
+ document.getElementById("dashboard").classList.remove("hidden");
+ document.getElementById("logoutTop").classList.remove("hidden");
+
+ document.getElementById("account").textContent=
+ "Logged in as: "+user.email;
+
+ await loadFiles();
+}
+
+// LOGOUT
+async function logout(){
+ const {error}=await db.auth.signOut();
+ if(error){
+  alert(error.message);
+  return;
+ }
+
+ currentUser=null;
+ currentFiles=[];
+
+ document.getElementById("dashboard").classList.add("hidden");
+ document.getElementById("auth").classList.remove("hidden");
+ document.getElementById("logoutTop").classList.add("hidden");
+ document.getElementById("password").value="";
+ showMessage("You have logged out.");
+}
+
+// UPLOAD FILE
+async function uploadFile(){
+ const file=document.getElementById("fileInput").files[0];
+
+ if(!file){
+  showStatus("Please choose a file first.");
+  return;
+ }
+
+ if(!currentUser){
+  showStatus("Please log in first.");
+  return;
+ }
+
+ const button=document.getElementById("uploadButton");
+ button.disabled=true;
+ showStatus("Uploading...");
+
+ try{
+  const safeName=file.name.replace(/[\/\\]/g,"_");
+  const path=currentUser.id+"/"+Date.now()+"_"+safeName;
+
+  const {error}=await db.storage
+   .from(BUCKET)
+   .upload(path,file,{upsert:false});
+
+  if(error) throw error;
+
+  showStatus("File uploaded successfully!");
+  document.getElementById("fileInput").value="";
+  await loadFiles();
+
+ }catch(error){
+  showStatus("Upload failed: "+error.message);
+ }finally{
+  button.disabled=false;
+ }
+}
+
+// LOAD FILES
+async function loadFiles(){
+ if(!currentUser)return;
+
+ const area=document.getElementById("files");
+ area.textContent="Loading files...";
+
+ try{
+  const {data,error}=await db.storage
+   .from(BUCKET)
+   .list(currentUser.id,{
+    limit:100,
+    sortBy:{column:"name",order:"desc"}
+   });
+
+  if(error)throw error;
+
+  currentFiles=(data||[]).filter(file=>file.id);
+  renderFiles();
+
+ }catch(error){
+  area.textContent="Could not load files: "+error.message;
+ }
+}
+
+// DISPLAY FILES
+function renderFiles(){
+ const area=document.getElementById("files");
+ area.innerHTML="";
+
+ const search=document.getElementById("search").value.toLowerCase();
+
+ const files=currentFiles.filter(file=>
+  file.name.toLowerCase().includes(search)
+ );
+
+ if(files.length===0){
+  area.textContent="No files found.";
+  return;
+ }
+
+ files.forEach(file=>{
+  const path=currentUser.id+"/"+file.name;
+
+  const row=document.createElement("div");
+  row.className="file";
+
+  const name=document.createElement("span");
+  name.textContent=file.name;
+
+  const actions=document.createElement("div");
+  actions.className="file-actions";
+
+  const download=document.createElement("button");
+  download.textContent="Download";
+  download.onclick=()=>downloadFile(path,file.name);
+
+  const remove=document.createElement("button");
+  remove.textContent="Delete";
+  remove.className="secondary";
+  remove.onclick=()=>deleteFile(path);
+
+  actions.append(download,remove);
+  row.append(name,actions);
+  area.appendChild(row);
+ });
+}
+
+// DOWNLOAD
+async function downloadFile(path,name){
+ try{
+  const {data,error}=await db.storage
+   .from(BUCKET)
+   .download(path);
+
+  if(error)throw error;
+
+  const url=URL.createObjectURL(data);
+  const link=document.createElement("a");
+
+  link.href=url;
+  link.download=name;
+  link.click();
+
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+
+ }catch(error){
+  alert("Download failed: "+error.message);
+ }
+}
+
+// DELETE
+async function deleteFile(path){
+ if(!confirm("Are you sure you want to delete this file?"))return;
+
+ try{
+  const {error}=await db.storage
+   .from(BUCKET)
+   .remove([path]);
+
+  if(error)throw error;
+
+  showStatus("File deleted.");
+  await loadFiles();
+
+ }catch(error){
+  alert("Delete failed: "+error.message);
+ }
+}
+
+// RESTORE LOGIN SESSION
+db.auth.getSession().then(({data,error})=>{
+ if(error){
+  showMessage(error.message);
+  return;
+ }
+ if(data.session){
+  showDashboard(data.session.user);
+ }
+});
+
+</script>
+</body>
+</html>
+
+
+
